@@ -206,7 +206,7 @@ describe("s3 tools", () => {
   });
 
   it("presign enforces expiry bounds", async () => {
-    const { call } = await setup();
+    const { callConfirmed: call } = await setup();
     for (const e of [0, -5, 604801, 1.5]) {
       const r = await call("s3_presign_get", { bucket: "bkt", key: "k", expires_in: e });
       expect(r.isError, String(e)).toBe(true);

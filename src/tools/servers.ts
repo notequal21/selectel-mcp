@@ -927,10 +927,18 @@ export const serverTools: AnyToolDef[] = [
   defineTool({
     name: "server_console_url",
     title: "Server console URL",
-    kind: "read",
+    kind: "write",
     description:
       "Returns a remote (noVNC) console URL for the server. WARNING: the URL grants interactive console access to the server; do not share it or post it anywhere.",
     input: { project: projectArg, region: regionArg, server: serverRef },
+    async plan(args, ctx) {
+      const loc = await resolveLocation(ctx, args);
+      const srv = await resolveServer(ctx, loc, args.server);
+      return {
+        summary: `Issue a remote console URL for server "${srv.name}" (${srv.id})`,
+        warnings: ["Anyone with the URL gets interactive console access to the server until it expires."],
+      };
+    },
     async run(args, ctx) {
       const loc = await resolveLocation(ctx, args);
       const srv = await resolveServer(ctx, loc, args.server);

@@ -600,10 +600,19 @@ export const s3Tools: AnyToolDef[] = [
   defineTool({
     name: "s3_presign_get",
     title: "Presigned download URL",
-    kind: "read",
+    kind: "write",
     description:
       "Creates a presigned GET URL for an object. WARNING: anyone who has the link can download the object until it expires (default 1 hour, max 7 days). Share only with the intended recipient.",
     input: { bucket: bucketSchema, key: keySchema, expires_in: expiresSchema, pool: poolSchema },
+    async plan(args, ctx) {
+      const exp = expires(args.expires_in);
+      const { pool } = s3(ctx, args.pool);
+      checkKey(args.key);
+      return {
+        summary: `Create presigned GET URL for s3://${args.bucket}/${args.key} (${pool}), valid ${exp}s`,
+        warnings: ["Anyone with the link can download this object until it expires."],
+      };
+    },
     async run(args, ctx) {
       const exp = expires(args.expires_in);
       const { client, pool } = s3(ctx, args.pool);

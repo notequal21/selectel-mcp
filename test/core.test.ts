@@ -31,3 +31,22 @@ describe("core", () => {
     expect(() => ctx.resolveRegion("ru-1")).toThrow(/not in SELECTEL_ALLOWED_REGIONS/);
   });
 });
+
+describe("toolsets & prompts", () => {
+  it("SELECTEL_TOOLSETS limits tools; account + overview always present", async () => {
+    const { tools } = await connect(testConfig({ mode: "full", toolsets: ["dns"] }), fakeFetch(() => undefined).impl);
+    expect(tools).toContain("dns_zones_list");
+    expect(tools).toContain("infra_overview");
+    expect(tools).not.toContain("servers_list");
+  });
+  it("registers prompts", async () => {
+    const { client } = await connect(testConfig(), fakeFetch(() => undefined).impl);
+    const { prompts } = await client.listPrompts();
+    expect(prompts.map((p) => p.name)).toEqual(expect.arrayContaining(["new_server", "cost_audit", "dns_migrate"]));
+  });
+  it("every mutating tool is hidden in readonly mode", async () => {
+    const { client } = await connect(testConfig({ mode: "readonly" }), fakeFetch(() => undefined).impl);
+    const { tools } = await client.listTools();
+    for (const t of tools) expect(t.annotations?.readOnlyHint, t.name).toBe(true);
+  });
+});

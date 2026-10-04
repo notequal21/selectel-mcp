@@ -39,6 +39,7 @@ export interface Config {
   protectedServers: string[];
   protectedTag: string;
   maxServersPerCall: number;
+  toolsets?: string[];
   enabledTools?: string[];
   disabledTools: string[];
 
@@ -143,6 +144,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     protectedServers: list(env.SELECTEL_PROTECTED_SERVERS) ?? [],
     protectedTag: env.SELECTEL_PROTECTED_TAG || "protected",
     maxServersPerCall: int("SELECTEL_MAX_SERVERS_PER_CALL", env.SELECTEL_MAX_SERVERS_PER_CALL, 3),
+    toolsets: list(env.SELECTEL_TOOLSETS),
     enabledTools: list(env.SELECTEL_ENABLED_TOOLS),
     disabledTools: list(env.SELECTEL_DISABLED_TOOLS) ?? [],
 
@@ -173,6 +175,7 @@ export function publicConfig(c: Config) {
     protectedServers: c.protectedServers,
     protectedTag: c.protectedTag,
     maxServersPerCall: c.maxServersPerCall,
+    toolsets: c.toolsets ?? "all",
     auditLog: c.auditLog ?? "off",
     filesRoot: c.filesRoot,
     s3: c.s3 ? { configured: true, defaultPool: c.s3.defaultPool } : { configured: false },
