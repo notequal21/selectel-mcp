@@ -162,12 +162,53 @@ async function serverAction(ctx: Context, loc: Location, id: string, body: unkno
 }
 
 async function regionsFor(ctx: Context, args: { project?: string; region?: string }): Promise<Location[]> {
-  if (args.region?.trim() === "all") {
+  const r = args.region?.trim();
+  if (r === "all" || (!r && !ctx.config.defaultRegion)) {
     const { project, scope } = await ctx.projectScope(args.project);
     const regions = await ctx.availableRegions("compute", scope);
     return regions.map((region) => ({ project, region, scope }));
   }
   return [await resolveLocation(ctx, args)];
+}
+
+/**
+ * Resolves a server reference. If no region is given and SELECTEL_REGION is not set, the server is searched
+ * in every available region, so users with servers in several pools don't have to know where each one lives.
+ */
+async function locateServer(
+  ctx: Context,
+  args: { project?: string; region?: string; server: string },
+): Promise<{ loc: Location; srv: Raw }> {
+  if (args.region?.trim() || ctx.config.defaultRegion) {
+    const loc = await resolveLocation(ctx, args);
+    return { loc, srv: await resolveServer(ctx, loc, args.server) };
+  }
+  const locs = await regionsFor(ctx, { project: args.project, region: "all" });
+  const found: { loc: Location; srv: Raw }[] = [];
+  const errors: string[] = [];
+  await Promise.all(
+    locs.map(async (loc) => {
+      try {
+        found.push({ loc, srv: await resolveServer(ctx, loc, args.server) });
+      } catch (e) {
+        const msg = (e as Error).message;
+        if (!/not found/.test(msg)) errors.push(`${loc.region}: ${msg}`);
+      }
+    }),
+  );
+  if (found.length === 1) return found[0]!;
+  if (found.length > 1) {
+    throw new Error(
+      `Server "${args.server}" exists in several regions: ${found
+        .map((f) => `${f.loc.region} (${f.srv.id})`)
+        .join(", ")}. Pass \`region\` or the server id.`,
+    );
+  }
+  throw new Error(
+    `Server "${args.server}" not found in regions ${locs.map((l) => l.region).join(", ")}${
+      errors.length ? `. Errors: ${errors.join("; ")}` : ""
+    }`,
+  );
 }
 
 interface ListFilter {
@@ -390,8 +431,7 @@ export const serverTools: AnyToolDef[] = [
       "Full details of one server by id or exact name: status, IPs (floating/fixed, public/private), flavor, image, key, attached volumes, security groups, availability zone, metadata. Use this to answer questions like \"what is the IP of server X\".",
     input: { project: projectArg, region: regionArg, server: serverRef },
     async run(args, ctx) {
-      const loc = await resolveLocation(ctx, args);
-      const srv = await resolveServer(ctx, loc, args.server);
+      const { loc, srv } = await locateServer(ctx, args);
       const base = await summarize(ctx, loc, srv, new Map());
       const volumes = await volumesOf(ctx, loc, srv);
       const bootVol = volumes.find((v) => "bootable" in v && v.bootable) as { image?: string } | undefined;
@@ -537,8 +577,7 @@ export const serverTools: AnyToolDef[] = [
       wait: waitArg,
     },
     async plan(args, ctx) {
-      const loc = await resolveLocation(ctx, args);
-      const srv = await resolveServer(ctx, loc, args.server);
+      const { loc, srv } = await locateServer(ctx, args);
       if (args.action === "start" && srv.status === "ACTIVE") throw new Error(`Server "${srv.name}" is already ACTIVE.`);
       if (args.action === "stop" && srv.status === "SHUTOFF") throw new Error(`Server "${srv.name}" is already SHUTOFF.`);
       const label = args.action === "reboot" ? `${args.reboot_type} reboot` : args.action;
@@ -552,8 +591,7 @@ export const serverTools: AnyToolDef[] = [
       };
     },
     async run(args, ctx) {
-      const loc = await resolveLocation(ctx, args);
-      const srv = await resolveServer(ctx, loc, args.server);
+      const { loc, srv } = await locateServer(ctx, args);
       const body =
         args.action === "start"
           ? { "os-start": null }
@@ -590,8 +628,7 @@ export const serverTools: AnyToolDef[] = [
       ram_mb: z.number().int().min(512).max(1048576).optional().describe("New RAM in MB (with vcpus)"),
     },
     async plan(args, ctx) {
-      const loc = await resolveLocation(ctx, args);
-      const srv = await resolveServer(ctx, loc, args.server);
+      const { loc, srv } = await locateServer(ctx, args);
       if (!["ACTIVE", "SHUTOFF"].includes(srv.status)) throw new Error(`Server is ${srv.status}; resize requires ACTIVE or SHUTOFF.`);
       const choice = await resolveFlavor(ctx, loc, args);
       const cur = await flavorOf(ctx, loc, srv, new Map());
@@ -615,8 +652,7 @@ export const serverTools: AnyToolDef[] = [
       };
     },
     async run(args, ctx) {
-      const loc = await resolveLocation(ctx, args);
-      const srv = await resolveServer(ctx, loc, args.server);
+      const { loc, srv } = await locateServer(ctx, args);
       const choice = await resolveFlavor(ctx, loc, args);
       const flavor = await ensureFlavor(ctx, loc, choice);
       const originalStatus = srv.status as string;
@@ -646,13 +682,11 @@ export const serverTools: AnyToolDef[] = [
     description: "Renames a server (display name only; the hostname inside the OS is not changed).",
     input: { project: projectArg, region: regionArg, server: serverRef, new_name: z.string().min(1).max(255).describe("New server name") },
     async plan(args, ctx) {
-      const loc = await resolveLocation(ctx, args);
-      const srv = await resolveServer(ctx, loc, args.server);
+      const { loc, srv } = await locateServer(ctx, args);
       return { summary: `Rename server ${srv.id} "${srv.name}" -> "${args.new_name}" in ${loc.region}`, details: { id: srv.id, from: srv.name, to: args.new_name } };
     },
     async run(args, ctx) {
-      const loc = await resolveLocation(ctx, args);
-      const srv = await resolveServer(ctx, loc, args.server);
+      const { loc, srv } = await locateServer(ctx, args);
       await os(ctx, loc, "compute", `/servers/${srv.id}`, { method: "PUT", body: { server: { name: args.new_name } } });
       return { id: srv.id, name: args.new_name };
     },
@@ -671,8 +705,7 @@ export const serverTools: AnyToolDef[] = [
       remove: z.array(z.string().min(1).max(255)).max(50).optional().describe("Keys to remove"),
     },
     async plan(args, ctx) {
-      const loc = await resolveLocation(ctx, args);
-      const srv = await resolveServer(ctx, loc, args.server);
+      const { loc, srv } = await locateServer(ctx, args);
       checkMetaKeys(ctx, args);
       if (!Object.keys(args.set ?? {}).length && !args.remove?.length) throw new Error("Nothing to do: pass `set` and/or `remove`.");
       const current: Record<string, string> = srv.metadata ?? {};
@@ -686,8 +719,7 @@ export const serverTools: AnyToolDef[] = [
       };
     },
     async run(args, ctx) {
-      const loc = await resolveLocation(ctx, args);
-      const srv = await resolveServer(ctx, loc, args.server);
+      const { loc, srv } = await locateServer(ctx, args);
       checkMetaKeys(ctx, args);
       if (Object.keys(args.set ?? {}).length) {
         await os(ctx, loc, "compute", `/servers/${srv.id}/metadata`, { method: "POST", body: { metadata: args.set } });
@@ -707,16 +739,14 @@ export const serverTools: AnyToolDef[] = [
     description: "Marks a server as protected (metadata flag) so delete and rebuild are refused.",
     input: { project: projectArg, region: regionArg, server: serverRef },
     async plan(args, ctx) {
-      const loc = await resolveLocation(ctx, args);
-      const srv = await resolveServer(ctx, loc, args.server);
+      const { loc, srv } = await locateServer(ctx, args);
       return {
         summary: `Protect server "${srv.name}" (${srv.id}) in ${loc.region}`,
         details: { id: srv.id, metadata_key: ctx.config.protectedTag, already_protected: protectedMeta(ctx, srv) },
       };
     },
     async run(args, ctx) {
-      const loc = await resolveLocation(ctx, args);
-      const srv = await resolveServer(ctx, loc, args.server);
+      const { loc, srv } = await locateServer(ctx, args);
       await os(ctx, loc, "compute", `/servers/${srv.id}/metadata`, {
         method: "POST",
         body: { metadata: { [ctx.config.protectedTag]: "true" } },
@@ -732,8 +762,7 @@ export const serverTools: AnyToolDef[] = [
     description: "Removes the protection metadata flag from a server, making delete/rebuild possible again.",
     input: { project: projectArg, region: regionArg, server: serverRef },
     async plan(args, ctx) {
-      const loc = await resolveLocation(ctx, args);
-      const srv = await resolveServer(ctx, loc, args.server);
+      const { loc, srv } = await locateServer(ctx, args);
       const key = unprotectKeys(ctx, srv);
       if (key.length === 0) {
         throw new Error(
@@ -749,8 +778,7 @@ export const serverTools: AnyToolDef[] = [
       };
     },
     async run(args, ctx) {
-      const loc = await resolveLocation(ctx, args);
-      const srv = await resolveServer(ctx, loc, args.server);
+      const { loc, srv } = await locateServer(ctx, args);
       for (const k of unprotectKeys(ctx, srv)) {
         await os(ctx, loc, "compute", `/servers/${srv.id}/metadata/${encodeURIComponent(k)}`, { method: "DELETE" });
       }
@@ -772,8 +800,7 @@ export const serverTools: AnyToolDef[] = [
       wait: waitArg,
     },
     async plan(args, ctx) {
-      const loc = await resolveLocation(ctx, args);
-      const srv = await resolveServer(ctx, loc, args.server);
+      const { loc, srv } = await locateServer(ctx, args);
       return {
         summary: `Snapshot server "${srv.name}" (${srv.id}) in ${loc.region} as image "${snapshotName(args, srv)}"`,
         details: { id: srv.id, status: srv.status, image_name: snapshotName(args, srv), wait: args.wait },
@@ -781,8 +808,7 @@ export const serverTools: AnyToolDef[] = [
       };
     },
     async run(args, ctx) {
-      const loc = await resolveLocation(ctx, args);
-      const srv = await resolveServer(ctx, loc, args.server);
+      const { loc, srv } = await locateServer(ctx, args);
       const name = snapshotName(args, srv);
       const r = await serverAction(ctx, loc, srv.id, { createImage: { name, metadata: {} } }, { "X-OpenStack-Nova-API-Version": "2.45" });
       let imageId: string | undefined = r?.image_id;
@@ -818,8 +844,7 @@ export const serverTools: AnyToolDef[] = [
       wait: waitArg,
     },
     async plan(args, ctx) {
-      const loc = await resolveLocation(ctx, args);
-      const srv = await resolveServer(ctx, loc, args.server);
+      const { loc, srv } = await locateServer(ctx, args);
       assertNotProtected(ctx, srv, "rebuild");
       const image = await resolveImage(ctx, loc, args.image);
       return {
@@ -829,8 +854,7 @@ export const serverTools: AnyToolDef[] = [
       };
     },
     async run(args, ctx) {
-      const loc = await resolveLocation(ctx, args);
-      const srv = await resolveServer(ctx, loc, args.server);
+      const { loc, srv } = await locateServer(ctx, args);
       assertNotProtected(ctx, srv, "rebuild");
       const image = await resolveImage(ctx, loc, args.image);
       // 2.93 is required by Nova to rebuild volume-backed servers.
@@ -858,8 +882,7 @@ export const serverTools: AnyToolDef[] = [
       release_floating_ips: z.boolean().default(false).describe("Also release (delete) floating IPs attached to the server"),
     },
     async plan(args, ctx) {
-      const loc = await resolveLocation(ctx, args);
-      const srv = await resolveServer(ctx, loc, args.server);
+      const { loc, srv } = await locateServer(ctx, args);
       assertNotProtected(ctx, srv, "delete");
       const volumes = await volumesOf(ctx, loc, srv);
       const fips = await serverFloatingIps(ctx, loc, srv.id).catch(() => []);
@@ -885,8 +908,7 @@ export const serverTools: AnyToolDef[] = [
       };
     },
     async run(args, ctx) {
-      const loc = await resolveLocation(ctx, args);
-      const srv = await resolveServer(ctx, loc, args.server);
+      const { loc, srv } = await locateServer(ctx, args);
       assertNotProtected(ctx, srv, "delete");
       const fips = args.release_floating_ips ? await serverFloatingIps(ctx, loc, srv.id) : [];
       await os(ctx, loc, "compute", `/servers/${srv.id}`, { method: "DELETE" });
@@ -916,8 +938,7 @@ export const serverTools: AnyToolDef[] = [
       lines: z.number().int().min(1).max(1000).default(100).describe("Number of last lines"),
     },
     async run(args, ctx) {
-      const loc = await resolveLocation(ctx, args);
-      const srv = await resolveServer(ctx, loc, args.server);
+      const { loc, srv } = await locateServer(ctx, args);
       const r = await serverAction(ctx, loc, srv.id, { "os-getConsoleOutput": { length: args.lines } });
       const out = String(r?.output ?? "");
       return { id: srv.id, name: srv.name, log: out.split("\n").slice(-args.lines).join("\n") };
@@ -932,16 +953,14 @@ export const serverTools: AnyToolDef[] = [
       "Returns a remote (noVNC) console URL for the server. WARNING: the URL grants interactive console access to the server; do not share it or post it anywhere.",
     input: { project: projectArg, region: regionArg, server: serverRef },
     async plan(args, ctx) {
-      const loc = await resolveLocation(ctx, args);
-      const srv = await resolveServer(ctx, loc, args.server);
+      const { loc, srv } = await locateServer(ctx, args);
       return {
         summary: `Issue a remote console URL for server "${srv.name}" (${srv.id})`,
         warnings: ["Anyone with the URL gets interactive console access to the server until it expires."],
       };
     },
     async run(args, ctx) {
-      const loc = await resolveLocation(ctx, args);
-      const srv = await resolveServer(ctx, loc, args.server);
+      const { loc, srv } = await locateServer(ctx, args);
       let url: string | undefined;
       try {
         const r = await os<Raw>(ctx, loc, "compute", `/servers/${srv.id}/remote-consoles`, {
@@ -972,8 +991,7 @@ export const serverTools: AnyToolDef[] = [
       timeout_sec: z.number().int().min(1).max(900).default(300).describe("Maximum wait in seconds"),
     },
     async run(args, ctx) {
-      const loc = await resolveLocation(ctx, args);
-      const srv = await resolveServer(ctx, loc, args.server);
+      const { loc, srv } = await locateServer(ctx, args);
       const { server, reached } = await waitStatus(ctx, loc, srv.id, [args.status.toUpperCase()], args.timeout_sec * 1000);
       return { id: srv.id, name: server.name, status: server.status, reached_target: reached, fault: server.fault?.message };
     },

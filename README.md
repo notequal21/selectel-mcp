@@ -178,7 +178,7 @@ env = { SELECTEL_MCP_MODE = "readonly" }
 | `SELECTEL_USERNAME` | — | Сервисный пользователь (обязательно) |
 | `SELECTEL_PASSWORD` / `_FILE` / `_CMD` | — | Пароль (обязательно, одним из способов) |
 | `SELECTEL_PROJECT_ID` | — | Проект по умолчанию (id). Инструменты принимают `project` (id или имя) |
-| `SELECTEL_REGION` | — | Регион (пул) по умолчанию, например `ru-9`. Инструменты принимают `region` |
+| `SELECTEL_REGION` | — | Необязательно. Регион (пул) по умолчанию, например `ru-9`. Если не задан: `servers_list` смотрит все регионы, сервер по имени ищется во всех регионах, остальные инструменты принимают `region` |
 | `SELECTEL_MCP_MODE` | `readonly` | `readonly` / `safe` / `full` |
 | `SELECTEL_CONFIRM` | `auto` | `auto` / `elicit` / `token` / `none` |
 | `SELECTEL_CONFIRM_TTL_SEC` | `300` | Время жизни `confirm_token` |

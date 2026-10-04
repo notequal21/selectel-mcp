@@ -50,3 +50,31 @@ describe("toolsets & prompts", () => {
     for (const t of tools) expect(t.annotations?.readOnlyHint, t.name).toBe(true);
   });
 });
+
+describe("multi-region", () => {
+  const srv = { id: "11111111-2222-3333-4444-555555555555", name: "web", status: "ACTIVE", flavor: { id: "f1" }, addresses: {}, metadata: {} };
+  const handler = (c: { url: string }) => {
+    if (c.url.includes("/flavors/")) return { body: { flavor: { id: "f1", name: "SL1", vcpus: 1, ram: 1024 } } };
+    if (c.url.includes("/servers/detail")) {
+      return { body: { servers: c.url.startsWith("https://compute.ru-1.") ? [srv] : [] } };
+    }
+    if (c.url.includes("/os-volume_attachments") || c.url.includes("/os-interface")) return { body: {} };
+    return undefined;
+  };
+
+  it("without SELECTEL_REGION, server_get finds the server in any region", async () => {
+    const { call } = await connect(testConfig({ defaultRegion: undefined }), fakeFetch(handler).impl);
+    const r = await call("server_get", { server: "web" });
+    expect(r.isError, r.text).toBe(false);
+    expect(r.text).toContain("ru-1");
+  });
+
+  it("without SELECTEL_REGION, servers_list scans all regions", async () => {
+    const f = fakeFetch(handler);
+    const { call } = await connect(testConfig({ defaultRegion: undefined }), f.impl);
+    const r = await call("servers_list");
+    expect(r.isError, r.text).toBe(false);
+    expect(r.text).toContain("web");
+    expect(f.calls.some((c) => c.url.startsWith("https://compute.ru-9."))).toBe(true);
+  });
+});

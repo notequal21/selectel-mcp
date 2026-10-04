@@ -4,7 +4,12 @@ import type { Context, Project } from "../core/context.js";
 
 /** Standard optional location arguments for regional (OpenStack) tools. */
 export const projectArg = z.string().optional().describe("Project id or name; default SELECTEL_PROJECT_ID");
-export const regionArg = z.string().optional().describe("Region/pool, e.g. ru-9; default SELECTEL_REGION");
+export const regionArg = z
+  .string()
+  .optional()
+  .describe(
+    "Region/pool, e.g. ru-9; default SELECTEL_REGION. For tools that take a server name/id it may be omitted: the server is then searched in all regions",
+  );
 
 export interface Location {
   project: Project;
