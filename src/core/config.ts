@@ -70,7 +70,7 @@ function secret(env: NodeJS.ProcessEnv, name: string): string | undefined {
   if (direct) return direct;
   const file = env[`${name}_FILE`];
   if (file) {
-    const path = resolve(file.replace(/^~(?=\/)/, homedir()));
+    const path = resolve(expandHome(file));
     if (process.platform !== "win32") {
       const mode = statSync(path).mode & 0o077;
       if (mode !== 0) {
@@ -86,6 +86,10 @@ function secret(env: NodeJS.ProcessEnv, name: string): string | undefined {
     return execFileSync(shell, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   }
   return undefined;
+}
+
+function expandHome(p: string): string {
+  return p === "~" ? homedir() : p.replace(/^~(?=[\\/])/, homedir());
 }
 
 function oneOf<T extends string>(name: string, v: string | undefined, allowed: readonly T[], dflt: T): T {
@@ -116,7 +120,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 
   const audit = env.SELECTEL_AUDIT_LOG;
   const auditLog =
-    audit === "off" || audit === "false" ? null : audit || join(homedir(), ".selectel-mcp", "audit.jsonl");
+    audit === "off" || audit === "false"
+      ? null
+      : resolve(expandHome(audit || join(homedir(), ".selectel-mcp", "audit.jsonl")));
 
   return {
     accountId,
@@ -141,7 +147,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     disabledTools: list(env.SELECTEL_DISABLED_TOOLS) ?? [],
 
     auditLog,
-    filesRoot: resolve(env.SELECTEL_FILES_ROOT || process.cwd()),
+    filesRoot: resolve(expandHome(env.SELECTEL_FILES_ROOT || process.cwd())),
 
     s3:
       s3Access && s3Secret
