@@ -78,3 +78,18 @@ describe("multi-region", () => {
     expect(f.calls.some((c) => c.url.startsWith("https://compute.ru-9."))).toBe(true);
   });
 });
+
+describe("auth by user id", () => {
+  it("UID in SELECTEL_USERNAME is sent as user.id", async () => {
+    const uid = "a".repeat(32);
+    let authBody: any;
+    const base = fakeFetch(() => ({ body: { projects: [] } }));
+    const spy = (async (input: any, init?: RequestInit) => {
+      if (String(input).endsWith("/auth/tokens")) authBody = JSON.parse(String(init?.body));
+      return base.impl(input, init);
+    }) as typeof fetch;
+    const { call } = await connect(testConfig({}, { SELECTEL_USERNAME: uid }), spy);
+    await call("projects_list");
+    expect(authBody.auth.identity.password.user).toEqual({ id: uid, password: "secret-password" });
+  });
+});

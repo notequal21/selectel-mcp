@@ -22,7 +22,10 @@ export type ConfirmMode = "auto" | "elicit" | "token" | "none";
 
 export interface Config {
   accountId: string;
+  /** Service user name; empty when userId is used. */
   username: string;
+  /** Service user UID (alternative to the name). */
+  userId?: string;
   password: string;
   userDomainName: string;
   authUrl: string;
@@ -109,10 +112,13 @@ function int(name: string, v: string | undefined, dflt: number): number {
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const missing: string[] = [];
   const accountId = env.SELECTEL_ACCOUNT_ID ?? "";
-  const username = env.SELECTEL_USERNAME ?? "";
+  // The control panel shows the service user's UID; accept it either in SELECTEL_USER_ID or in SELECTEL_USERNAME.
+  const rawUser = env.SELECTEL_USERNAME ?? "";
+  const userId = env.SELECTEL_USER_ID || (/^[0-9a-f]{32}$/i.test(rawUser) ? rawUser : undefined);
+  const username = userId ? "" : rawUser;
   const password = secret(env, "SELECTEL_PASSWORD") ?? "";
   if (!accountId) missing.push("SELECTEL_ACCOUNT_ID");
-  if (!username) missing.push("SELECTEL_USERNAME");
+  if (!username && !userId) missing.push("SELECTEL_USERNAME (service user name) or SELECTEL_USER_ID (its UID)");
   if (!password) missing.push("SELECTEL_PASSWORD (or SELECTEL_PASSWORD_FILE / SELECTEL_PASSWORD_CMD)");
   if (missing.length) throw new ConfigError(`Missing required settings: ${missing.join(", ")}`);
 
@@ -128,6 +134,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
     accountId,
     username,
+    userId,
     password,
     userDomainName: env.SELECTEL_USER_DOMAIN_NAME || accountId,
     authUrl: (env.SELECTEL_AUTH_URL || "https://cloud.api.selcloud.ru/identity/v3").replace(/\/+$/, ""),
@@ -164,7 +171,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 export function publicConfig(c: Config) {
   return {
     accountId: c.accountId,
-    username: c.username,
+    username: c.username || null,
+    userId: c.userId ?? null,
     authRegion: c.authRegion,
     defaultProjectId: c.defaultProjectId ?? null,
     allowedProjects: c.allowedProjects ?? "any",

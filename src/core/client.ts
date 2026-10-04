@@ -90,7 +90,9 @@ export class SelectelClient {
         identity: {
           methods: ["password"],
           password: {
-            user: { name: c.username, domain: { name: c.userDomainName }, password: c.password },
+            user: c.userId
+              ? { id: c.userId, password: c.password }
+              : { name: c.username, domain: { name: c.userDomainName }, password: c.password },
           },
         },
         scope: scope.kind === "account" ? { domain: { name: c.accountId } } : { project: { id: scope.projectId } },
@@ -108,7 +110,7 @@ export class SelectelClient {
       const msg = scrubText(extractErrorMessage(text), [c.password]);
       const hint =
         res.status === 401
-          ? " — check SELECTEL_ACCOUNT_ID / SELECTEL_USERNAME / password"
+          ? " — check SELECTEL_ACCOUNT_ID / SELECTEL_USERNAME (or SELECTEL_USER_ID) / password"
           : res.status === 403 && scope.kind === "project"
             ? ` — service user has no role in project ${scope.projectId}`
             : "";
