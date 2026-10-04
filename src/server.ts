@@ -4,11 +4,16 @@ import type { Config } from "./core/config.js";
 import { Context } from "./core/context.js";
 import { registerTools, type AnyToolDef } from "./core/tool.js";
 import { accountTools } from "./tools/account.js";
+import { computeCatalogTools } from "./tools/compute-catalog.js";
+import { networkTools } from "./tools/network.js";
+import { s3Tools } from "./tools/s3.js";
+import { serverTools } from "./tools/servers.js";
+import { volumeTools } from "./tools/volumes.js";
 
 export const VERSION = "0.1.0";
 
 export function allTools(): AnyToolDef[] {
-  return [...accountTools];
+  return [...accountTools, ...serverTools, ...computeCatalogTools, ...networkTools, ...volumeTools, ...s3Tools];
 }
 
 export function createServer(config: Config, fetchImpl: typeof fetch = fetch) {

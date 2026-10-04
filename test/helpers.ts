@@ -45,8 +45,10 @@ export function fakeFetch(handler: Handler, types = DEFAULT_TYPES) {
     calls.push(call);
     const r = handler(call);
     if (!r) return new Response(JSON.stringify({ itemNotFound: { message: `no fake for ${method} ${url}` } }), { status: 404 });
-    return new Response(r.body === undefined ? "" : typeof r.body === "string" ? r.body : JSON.stringify(r.body), {
-      status: r.status ?? 200,
+    const status = r.status ?? 200;
+    const noBody = r.body === undefined || status === 204 || status === 304;
+    return new Response(noBody ? null : typeof r.body === "string" ? r.body : JSON.stringify(r.body), {
+      status,
       headers: { "content-type": "application/json", ...r.headers },
     });
   }) as typeof fetch;

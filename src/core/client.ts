@@ -195,6 +195,11 @@ export class SelectelClient {
     if (res.status === 401) {
       res = await doFetch((await this.getToken(scope, true)).token);
     }
+    // Requested API microversion not supported by this region: retry once with the service default.
+    if (res.status === 406 && opts.headers && Object.keys(opts.headers).some((h) => /api-version/i.test(h))) {
+      const headers = Object.fromEntries(Object.entries(opts.headers).filter(([h]) => !/api-version/i.test(h)));
+      return this.requestUrl<T>(scope, url, { ...opts, headers });
+    }
     const text = await res.text();
     if (!res.ok) {
       const msg = scrubText(extractErrorMessage(text), [this.config.password]);
