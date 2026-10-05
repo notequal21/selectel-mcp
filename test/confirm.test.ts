@@ -10,7 +10,9 @@ import { Context } from "../src/core/context.js";
 import { defineTool, registerTools } from "../src/core/tool.js";
 import { fakeFetch, testConfig } from "./helpers.js";
 
-function setup(config: Config, opts: { elicit?: "accept" | "decline" } = {}) {
+type ElicitReply = "accept" | "decline" | "cancel" | "unticked" | "throw";
+
+function setup(config: Config, opts: { elicit?: ElicitReply } = {}) {
   const runs: unknown[] = [];
   const tools = [
     defineTool({
@@ -49,9 +51,18 @@ function setup(config: Config, opts: { elicit?: "accept" | "decline" } = {}) {
       const names = registerTools(server, ctx, tools);
       const client = new Client({ name: "c", version: "0" }, opts.elicit ? { capabilities: { elicitation: {} } } : {});
       if (opts.elicit) {
-        client.setRequestHandler(ElicitRequestSchema, async () =>
-          opts.elicit === "accept" ? { action: "accept", content: { confirm: true } } : { action: "decline" },
-        );
+        client.setRequestHandler(ElicitRequestSchema, async () => {
+          switch (opts.elicit) {
+            case "accept":
+              return { action: "accept", content: {} };
+            case "unticked":
+              return { action: "accept", content: { confirm: false } };
+            case "throw":
+              throw new Error("boom");
+            default:
+              return { action: opts.elicit as "decline" | "cancel" };
+          }
+        });
       }
       const [a, b] = InMemoryTransport.createLinkedPair();
       await Promise.all([server.connect(a), client.connect(b)]);
@@ -129,7 +140,39 @@ describe("elicitation confirmation", () => {
   it("does nothing when the user declines", async () => {
     const s = setup(testConfig({ mode: "full", confirm: "auto" }), { elicit: "decline" });
     const { call } = await s.connect();
-    expect((await call("thing_delete", { id: "a" })).text).toContain("Cancelled");
+    expect((await call("thing_delete", { id: "a" })).text).toContain("declined");
+    expect(s.runs).toHaveLength(0);
+  });
+  it("accepting the dialog without touching the checkbox confirms", async () => {
+    const s = setup(testConfig({ mode: "full", confirm: "auto" }), { elicit: "accept" });
+    const { call } = await s.connect();
+    await call("thing_write", { size: 3 });
+    expect(s.runs).toHaveLength(1);
+  });
+  it("an explicitly unticked checkbox refuses", async () => {
+    const s = setup(testConfig({ mode: "full", confirm: "auto" }), { elicit: "unticked" });
+    const { call } = await s.connect();
+    expect((await call("thing_write", { size: 3 })).text).toContain("declined");
+    expect(s.runs).toHaveLength(0);
+  });
+  for (const reply of ["cancel", "throw"] as const) {
+    it(`auto mode falls back to chat (token) confirmation when the dialog ${reply}s`, async () => {
+      const s = setup(testConfig({ mode: "full", confirm: "auto" }), { elicit: reply });
+      const { call } = await s.connect();
+      const plan = await call("thing_delete", { id: "a" });
+      expect(plan.text).toContain("PLAN ONLY");
+      expect(s.runs).toHaveLength(0);
+      const token = plan.text.match(/confirm_token="([^"]+)"/)![1];
+      expect((await call("thing_delete", { id: "a", confirm_token: token })).text).toContain("deleted");
+      expect(s.runs).toHaveLength(1);
+    });
+  }
+  it("elicit mode never falls back to tokens", async () => {
+    const s = setup(testConfig({ mode: "full", confirm: "elicit" }), { elicit: "cancel" });
+    const { call } = await s.connect();
+    const r = await call("thing_delete", { id: "a" });
+    expect(r.text).not.toContain("confirm_token");
+    expect((await call("thing_delete", { id: "a", confirm_token: "x" })).isError).toBe(true);
     expect(s.runs).toHaveLength(0);
   });
   it("elicit mode refuses when client lacks support", async () => {

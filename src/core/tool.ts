@@ -72,6 +72,30 @@ function formatPlan(tool: string, plan: Plan): string {
 
 type ConfirmResult = { proceed: true } | { proceed: false; result: CallToolResult };
 
+async function tokenPlan(
+  def: AnyToolDef,
+  ctx: Context,
+  args: Record<string, unknown>,
+  plan: Plan,
+  note?: string,
+): Promise<ConfirmResult> {
+  const { token, expiresInSec } = ctx.confirmTokens.issue(def.name, args);
+  await ctx.audit.write({ tool: def.name, kind: def.kind, args, outcome: "planned", summary: plan.summary });
+  return {
+    proceed: false,
+    result: ok(
+      [
+        "PLAN ONLY — nothing has been changed yet.",
+        ...(note ? [note] : []),
+        "",
+        formatPlan(def.name, plan),
+        "",
+        `To execute: show this plan to the user, get their explicit approval in the chat, then call ${def.name} again with exactly the same arguments plus confirm_token="${token}" (valid ${expiresInSec}s, single use).`,
+      ].join("\n"),
+    ),
+  };
+}
+
 async function confirm(
   server: McpServer,
   def: AnyToolDef,
@@ -86,6 +110,9 @@ async function confirm(
     method = "auto";
   }
   const canElicit = Boolean(server.server.getClientCapabilities()?.elicitation);
+  if (method === "elicit" && confirmToken) {
+    return { proceed: false, result: fail("SELECTEL_CONFIRM=elicit: confirm_token is not accepted, confirm in the dialog.") };
+  }
   if (method === "elicit" && !canElicit) {
     return {
       proceed: false,
@@ -95,40 +122,41 @@ async function confirm(
     };
   }
 
-  if (method === "elicit" || (method === "auto" && canElicit)) {
-    const res = await server.server.elicitInput({
-      mode: "form",
-      message: `Selectel: подтвердите действие\n\n${formatPlan(def.name, plan)}`,
-      requestedSchema: {
-        type: "object",
-        properties: {
-          confirm: { type: "boolean", title: "Выполнить?", description: plan.summary, default: false },
+  // A confirm_token is only ever issued after the dialog fell back to chat confirmation (or in token mode),
+  // so a call carrying one goes straight to token validation instead of showing the dialog again.
+  if (!confirmToken && (method === "elicit" || (method === "auto" && canElicit))) {
+    let note: string;
+    try {
+      const res = await server.server.elicitInput({
+        mode: "form",
+        message: `Selectel: подтвердите действие\n\n${formatPlan(def.name, plan)}`,
+        requestedSchema: {
+          type: "object",
+          properties: {
+            confirm: { type: "boolean", title: "Выполнить", description: plan.summary, default: true },
+          },
         },
-        required: ["confirm"],
-      },
-    });
-    if (res.action === "accept" && res.content?.confirm === true) return { proceed: true };
-    await ctx.audit.write({ tool: def.name, kind: def.kind, args, outcome: "cancelled", summary: plan.summary });
-    return { proceed: false, result: ok(`Cancelled by user. Nothing was changed.\n\n${formatPlan(def.name, plan)}`) };
+      });
+      // Accepting the dialog is the confirmation; only an explicitly unticked box counts as "no".
+      if (res.action === "accept" && res.content?.confirm !== false) return { proceed: true };
+      if (res.action === "decline" || res.action === "accept" || method === "elicit") {
+        await ctx.audit.write({ tool: def.name, kind: def.kind, args, outcome: "cancelled", summary: plan.summary });
+        return {
+          proceed: false,
+          result: ok(`The user declined in the confirmation dialog (${res.action}). Nothing was changed.\n\n${formatPlan(def.name, plan)}`),
+        };
+      }
+      // "cancel": the dialog was dismissed or the client could not show it — fall back to the token flow.
+      note = "The confirmation dialog was dismissed or not shown by this client, so falling back to chat confirmation.";
+    } catch (e) {
+      if (method === "elicit") throw e;
+      note = `The confirmation dialog failed (${(e as Error).message}), so falling back to chat confirmation.`;
+    }
+    return tokenPlan(def, ctx, args, plan, note);
   }
 
   // token flow
-  if (!confirmToken) {
-    const { token, expiresInSec } = ctx.confirmTokens.issue(def.name, args);
-    await ctx.audit.write({ tool: def.name, kind: def.kind, args, outcome: "planned", summary: plan.summary });
-    return {
-      proceed: false,
-      result: ok(
-        [
-          "PLAN ONLY — nothing has been changed yet.",
-          "",
-          formatPlan(def.name, plan),
-          "",
-          `To execute: show this plan to the user, get their explicit approval, then call ${def.name} again with exactly the same arguments plus confirm_token="${token}" (valid ${expiresInSec}s, single use).`,
-        ].join("\n"),
-      ),
-    };
-  }
+  if (!confirmToken) return tokenPlan(def, ctx, args, plan);
   const err = ctx.confirmTokens.consume(confirmToken, def.name, args);
   if (err) return { proceed: false, result: fail(err) };
   return { proceed: true };
