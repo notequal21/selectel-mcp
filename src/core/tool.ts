@@ -143,7 +143,15 @@ async function confirm(
         await ctx.audit.write({ tool: def.name, kind: def.kind, args, outcome: "cancelled", summary: plan.summary });
         return {
           proceed: false,
-          result: ok(`The user declined in the confirmation dialog (${res.action}). Nothing was changed.\n\n${formatPlan(def.name, plan)}`),
+          result: ok(
+            [
+              `The confirmation dialog returned "${res.action}". Nothing was changed.`,
+              "Do NOT retry on your own. If the user says they never saw a dialog, their client answers dialogs automatically:",
+              "tell them to set SELECTEL_CONFIRM=token in the MCP env and reconnect (do not change it yourself).",
+              "",
+              formatPlan(def.name, plan),
+            ].join("\n"),
+          ),
         };
       }
       // "cancel": the dialog was dismissed or the client could not show it — fall back to the token flow.

@@ -16,6 +16,8 @@ const PROJECTS_TTL_MS = 5 * 60 * 1000;
 export class Context {
   readonly audit: AuditLog;
   readonly confirmTokens: ConfirmTokens;
+  /** Filled after the MCP handshake: which client is connected and whether it claims dialog (elicitation) support. */
+  client: { name?: string; version?: string; elicitation: boolean } | null = null;
   private projectsCache: { at: number; items: Project[] } | null = null;
 
   constructor(

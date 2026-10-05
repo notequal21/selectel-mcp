@@ -51,6 +51,14 @@ export function createServer(config: Config, fetchImpl: typeof fetch = fetch) {
     },
   );
   const tools = registerTools(server, ctx, allTools(config.toolsets));
+  server.server.oninitialized = () => {
+    const info = server.server.getClientVersion();
+    ctx.client = {
+      name: info?.name,
+      version: info?.version,
+      elicitation: Boolean(server.server.getClientCapabilities()?.elicitation),
+    };
+  };
   registerPrompts(server);
   return { server, ctx, tools };
 }

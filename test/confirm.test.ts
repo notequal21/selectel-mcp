@@ -140,7 +140,7 @@ describe("elicitation confirmation", () => {
   it("does nothing when the user declines", async () => {
     const s = setup(testConfig({ mode: "full", confirm: "auto" }), { elicit: "decline" });
     const { call } = await s.connect();
-    expect((await call("thing_delete", { id: "a" })).text).toContain("declined");
+    expect((await call("thing_delete", { id: "a" })).text).toContain("Nothing was changed");
     expect(s.runs).toHaveLength(0);
   });
   it("accepting the dialog without touching the checkbox confirms", async () => {
@@ -152,7 +152,7 @@ describe("elicitation confirmation", () => {
   it("an explicitly unticked checkbox refuses", async () => {
     const s = setup(testConfig({ mode: "full", confirm: "auto" }), { elicit: "unticked" });
     const { call } = await s.connect();
-    expect((await call("thing_write", { size: 3 })).text).toContain("declined");
+    expect((await call("thing_write", { size: 3 })).text).toContain("Nothing was changed");
     expect(s.runs).toHaveLength(0);
   });
   for (const reply of ["cancel", "throw"] as const) {

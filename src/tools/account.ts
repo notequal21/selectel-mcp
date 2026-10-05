@@ -18,7 +18,12 @@ export const accountTools: AnyToolDef[] = [
       } catch (e) {
         auth = `failed: ${(e as Error).message}`;
       }
-      return { auth, settings: publicConfig(ctx.config) };
+      const c = ctx.client;
+      const confirmation =
+        ctx.config.confirm === "token" || ctx.config.confirm === "none" || (ctx.config.confirm === "auto" && !c?.elicitation)
+          ? "chat (plan + confirm_token)"
+          : "dialog in the client (elicitation)";
+      return { auth, client: c, confirmation, settings: publicConfig(ctx.config) };
     },
   }),
   defineTool({

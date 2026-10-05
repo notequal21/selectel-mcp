@@ -93,3 +93,12 @@ describe("auth by user id", () => {
     expect(authBody.auth.identity.password.user).toEqual({ id: uid, password: "secret-password" });
   });
 });
+
+describe("status", () => {
+  it("reports the connected client and confirmation method", async () => {
+    const { call } = await connect(testConfig({ confirm: "auto" }), fakeFetch(() => undefined).impl);
+    const r = await call("selectel_status");
+    expect(r.text).toContain('"name": "test"');
+    expect(r.text).toContain("chat (plan + confirm_token)");
+  });
+});
